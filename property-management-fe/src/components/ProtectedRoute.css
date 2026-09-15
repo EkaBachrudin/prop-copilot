@@ -1,0 +1,7 @@
+.protected-route__loading {
+  display: flex;
+  min-height: 100dvh;
+  align-items: center;
+  justify-content: center;
+  background: var(--canvas);
+}

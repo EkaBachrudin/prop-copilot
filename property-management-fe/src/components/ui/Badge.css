@@ -1,0 +1,40 @@
+.badge {
+  display: inline-flex;
+  align-items: center;
+  border-radius: var(--radius-pill);
+  padding: 2px 9px;
+  font-size: 11px;
+  font-weight: 600;
+  line-height: 1.5;
+  white-space: nowrap;
+}
+
+.badge--gray {
+  background: var(--surface-2);
+  color: var(--ink-2);
+}
+
+.badge--blue {
+  background: var(--primary-soft);
+  color: var(--primary-hover);
+}
+
+.badge--green {
+  background: var(--st-available-soft);
+  color: var(--st-available-ink);
+}
+
+.badge--red {
+  background: var(--st-sold-soft);
+  color: var(--st-sold-ink);
+}
+
+.badge--purple {
+  background: var(--st-booked-soft);
+  color: var(--st-booked-ink);
+}
+
+.badge--orange {
+  background: var(--st-reserved-soft);
+  color: var(--st-reserved-ink);
+}

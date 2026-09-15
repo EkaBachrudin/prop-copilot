@@ -1,0 +1,21 @@
+.card {
+  border: 1px solid var(--line);
+  border-radius: var(--radius-lg);
+  background: var(--surface);
+}
+
+.card--none {
+  padding: 0;
+}
+
+.card--sm {
+  padding: 14px;
+}
+
+.card--md {
+  padding: 20px;
+}
+
+.card--lg {
+  padding: 32px;
+}
