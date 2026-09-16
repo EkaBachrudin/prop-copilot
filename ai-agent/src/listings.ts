@@ -172,6 +172,10 @@ export async function fetchListingCatalog(
     params.push(filters.cities);
     conditions.push(`p.city = ANY($${params.length}::text[])`);
   }
+  if (filters.propertyIds && filters.propertyIds.length > 0) {
+    params.push(filters.propertyIds);
+    conditions.push(`p.id = ANY($${params.length}::uuid[])`);
+  }
   if (filters.propertyType) {
     params.push(filters.propertyType);
     conditions.push(`u.property_type = $${params.length}`);

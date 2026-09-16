@@ -72,8 +72,15 @@ export interface ListingRow {
   description: string | null;
 }
 
+export interface KnownProperty {
+  id: string;
+  name: string;
+  city: string;
+}
+
 export interface ListingFilters {
   cities?: string[];
+  propertyIds?: string[];
   propertyType?: string | null;
   maxPrice?: number | null;
 }

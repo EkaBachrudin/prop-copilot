@@ -1,7 +1,12 @@
 import { AIMessage, HumanMessage, SystemMessage, type BaseMessage } from '@langchain/core/messages';
 import { ChatOpenAI } from '@langchain/openai';
 import { config } from './config';
-import { detectMatchingAreas, getKnownAreas } from './areas';
+import {
+  detectMatchingAreas,
+  detectMatchingProperties,
+  getKnownAreas,
+  getKnownProperties,
+} from './areas';
 import { parseBudgetToIdr } from './budget';
 import { enforceHandoffGate } from './handoff';
 import {
@@ -38,6 +43,7 @@ import type {
   AgentSession,
   CatalogProperty,
   KnownLead,
+  KnownProperty,
   RetrievedChunk,
   StoredAgentState,
 } from './types';
@@ -53,6 +59,7 @@ KNOWLEDGE BASE — GROUNDING RULES (CRITICAL)
 - You may ONLY present properties/units that appear in [PROPERTY CATALOG] or [UNIT DETAIL]. NEVER invent projects, units, prices, sizes, or cities.
 - [KNOWLEDGE BASE] holds general company documents (profiles, FAQ). Use it to answer general questions, NEVER as a source of listings.
 - If [PROPERTY CATALOG] is empty, do not present any listing.
+- If the customer names a specific project (even with a small typo, e.g. "brasia garden" for "Brassia Garden") and it appears in [PROPERTY CATALOG], acknowledge it and NEVER say you do not have it.
 - "Area" always means the property CITY (e.g. Bekasi, Jakarta Selatan).
 
 AVAILABLE AREAS
@@ -66,13 +73,13 @@ PROPERTY TYPES
 - Only these property types exist: Rumah, Ruko, Tanah, Apartemen, Komersial, Villa.
 
 CONVERSATION FLOW (STRICT)
-STEP 1 — Determine intent: greet warmly and ask which property the customer is looking for.
+STEP 1 — Determine intent: greet warmly. If the customer names a project present in [PROPERTY CATALOG], acknowledge it and confirm it is available, then ask only for the still-missing fields. Otherwise ask which property the customer is looking for.
 STEP 2 — Buyer flow: ask ONLY for the still-missing fields (budget, property_type, area, size). NEVER re-ask for a field that is already listed in [KNOWN CUSTOMER DATA]. The "purpose" field defaults to "Buy" — only ask about it if the customer mentions renting or investing.
 STEP 3 — Show listings: present [PROPERTY CATALOG] ONLY when AREA is known AND both budget and property_type are known.
   STEP 3a — PROPERTY LEVEL (always first): list each matching property as ONE bullet line: "• <Project Name> — <City> · <description> · <n> unit tersedia · <price range>". Then on the following indented lines list the block summary from the catalog, each starting with "- ", e.g. "  - Blok A: 8 unit tersedia · Rumah · 84 m² · Rp 1.008.000.000". If several properties match, show all of them, then ask which one the customer wants to see in detail.
   STEP 3b — UNIT LEVEL (separate paragraph, only when asked): show [UNIT DETAIL] for the chosen property/block as a numbered list, e.g. "1. A1 · Rumah · 84 m² · Rp 1.008.000.000". Reveal unit-level detail ONLY when the customer asks for detail (e.g. "detail", "unit", "tipe", "luas") or names a property/block.
   - Never dump every unit unprompted; property + block summary comes first.
-STEP 4 — No-match fallback: if no property matches the requested city/type, say so honestly and mention what is actually available (the cities in [AVAILABLE AREAS] and/or the property types present in the city). If properties exist but are above the customer's budget, say so honestly and mention the lowest available price. Never invent a listing to fill the gap.
+STEP 4 — No-match fallback: only state that a project/city/type is unavailable when [PROPERTY CATALOG] or [AVAILABLE AREAS] actually contain data and no match exists. NEVER claim a project does not exist when [PROPERTY CATALOG] is empty — ask a clarifying question instead (e.g. which city, or what budget). If properties exist but are above the customer's budget, say so honestly and mention the lowest available price. Never invent a listing to fill the gap.
 STEP 5 — Wrap up / handoff: set needs_human_followup to true ONLY after the property-level listings (or fallback), and only when budget + area + property_type are all known. End with a closing line that contains "Agen kami akan menghubungi Anda". After handoff, do not ask any further questions.
 
 OUTPUT FORMAT
@@ -114,7 +121,8 @@ RULES (STRICT)
 12. If user_type="unknown", every lead_data field must be null.
 13. Once needs_human_followup=true, keep it true, ask nothing further, and only send a short closing.
 14. The first handoff response must already contain the listings/fallback AND the closing line.
-15. Respond with ONLY valid JSON {...} — no other text or markdown.`;
+15. Respond with ONLY valid JSON {...} — no other text or markdown.
+16. NEVER say a named project is unavailable when [PROPERTY CATALOG] is empty — ask for clarification instead.`;
 
 const JSON_BLOCK = /\{[\s\S]*\}/;
 const HANDOFF_CLOSING = 'Baik, agen kami akan menghubungi Anda. Terima kasih.';
@@ -204,11 +212,20 @@ interface BuiltContext {
   context: string;
   matchedCities: string[];
   knownCities: string[];
+  matchedProperties: KnownProperty[];
 }
 
 async function buildContext(userMessage: string, known: KnownLead): Promise<BuiltContext> {
   const knownCities = await getKnownAreas();
   const matchedCities = detectMatchingAreas(userMessage, knownCities);
+
+  let knownProperties: KnownProperty[] = [];
+  try {
+    knownProperties = await getKnownProperties();
+  } catch (error) {
+    console.error('[agent] property lookup failed', error);
+  }
+  const matchedProperties = detectMatchingProperties(userMessage, knownProperties);
 
   let docChunks: RetrievedChunk[] = [];
   try {
@@ -223,7 +240,15 @@ async function buildContext(userMessage: string, known: KnownLead): Promise<Buil
   const storedCity = areaValue
     ? knownCities.find((city) => city.toLowerCase() === areaValue.toLowerCase())
     : undefined;
-  const cities = matchedCities.length > 0 ? matchedCities : storedCity ? [storedCity] : [];
+  const projectCities = [...new Set(matchedProperties.map((property) => property.city))].filter(
+    (city) =>
+      hasText(city) && knownCities.some((known) => known.toLowerCase() === city.toLowerCase())
+  );
+  const cities =
+    matchedCities.length > 0 ? matchedCities : storedCity ? [storedCity] : projectCities;
+
+  const propertyIds = matchedProperties.map((property) => property.id);
+  const scopedToProperty = propertyIds.length > 0;
 
   let catalog: CatalogProperty[] = [];
   if (cities.length > 0) {
@@ -237,12 +262,21 @@ async function buildContext(userMessage: string, known: KnownLead): Promise<Buil
         : undefined;
     const maxPrice = parseBudgetToIdr(userMessage) ?? parseBudgetToIdr(known.budget);
 
+    const fetchCatalog = (overrides: Partial<Parameters<typeof fetchListingCatalog>[0]>) =>
+      fetchListingCatalog({
+        cities,
+        propertyIds: scopedToProperty ? propertyIds : undefined,
+        propertyType,
+        maxPrice,
+        ...overrides,
+      });
+
     try {
-      catalog = await fetchListingCatalog({ cities, propertyType, maxPrice });
-      if (catalog.length === 0) {
-        catalog = await fetchListingCatalog({ cities, propertyType });
-      }
-      if (catalog.length === 0) {
+      catalog = await fetchCatalog({});
+      if (catalog.length === 0) catalog = await fetchCatalog({ maxPrice: null });
+      if (catalog.length === 0)
+        catalog = await fetchCatalog({ maxPrice: null, propertyType: null });
+      if (catalog.length === 0 && scopedToProperty) {
         catalog = await fetchListingCatalog({ cities });
       }
     } catch (error) {
@@ -267,7 +301,7 @@ async function buildContext(userMessage: string, known: KnownLead): Promise<Buil
     }
   }
 
-  return { context: parts.join('\n\n'), matchedCities, knownCities };
+  return { context: parts.join('\n\n'), matchedCities, knownCities, matchedProperties };
 }
 
 function buildAugmentedMessage(
