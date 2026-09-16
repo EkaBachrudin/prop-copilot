@@ -2,6 +2,7 @@ import { AIMessage, HumanMessage, SystemMessage, type BaseMessage } from '@langc
 import { ChatOpenAI } from '@langchain/openai';
 import { config } from './config';
 import { detectMatchingAreas, getKnownAreas } from './areas';
+import { parseBudgetToIdr } from './budget';
 import { enforceHandoffGate } from './handoff';
 import {
   buildKnownDataBlock,
@@ -13,10 +14,17 @@ import {
   mergeLeadData,
   backfillLeadData,
   missingFields,
+  normalizeArea,
   normalizeLeadData,
   stripListingLines,
 } from './leadState';
-import { retrieve } from './rag';
+import {
+  buildPropertyCatalogBlock,
+  buildUnitDetailBlock,
+  fetchListingCatalog,
+  wantsUnitDetail,
+} from './listings';
+import { DOC_TYPE_DOCUMENT, retrieve } from './rag';
 import {
   clearAgentState,
   deserializeHistory,
@@ -24,9 +32,11 @@ import {
   saveAgentState,
   serializeHistory,
 } from './sessionStore';
+import { PROPERTY_TYPES } from './types';
 import type {
   AgentResult,
   AgentSession,
+  CatalogProperty,
   KnownLead,
   RetrievedChunk,
   StoredAgentState,
@@ -38,13 +48,16 @@ LANGUAGE
 - Default to Bahasa Indonesia. If the customer writes in another language, mirror that language.
 
 KNOWLEDGE BASE — GROUNDING RULES (CRITICAL)
-- You may ONLY present properties that appear in the [KNOWLEDGE BASE] block.
-- NEVER invent listings, prices, sizes, or areas. Only present properties that appear in [KNOWLEDGE BASE].
-- If [KNOWLEDGE BASE] is empty, do not present any listing.
+- [PROPERTY CATALOG] holds the property-level inventory: project name, city, address, description, available unit count, price range, and a per-block summary.
+- [UNIT DETAIL] holds individual available units (unit name, type, size, price, status).
+- You may ONLY present properties/units that appear in [PROPERTY CATALOG] or [UNIT DETAIL]. NEVER invent projects, units, prices, sizes, or cities.
+- [KNOWLEDGE BASE] holds general company documents (profiles, FAQ). Use it to answer general questions, NEVER as a source of listings.
+- If [PROPERTY CATALOG] is empty, do not present any listing.
+- "Area" always means the property CITY (e.g. Bekasi, Jakarta Selatan).
 
 AVAILABLE AREAS
-- The [AVAILABLE AREAS] list shows the areas that currently have inventory.
-- Only use it when the area the customer asked about has no matching listing.
+- [AVAILABLE AREAS] lists the cities that currently have inventory.
+- Only use it when the area the customer asked about has no matching property.
 
 CUSTOMER IDENTITY
 - The customer's phone number and name are already supplied in the context. NEVER ask for them.
@@ -55,9 +68,12 @@ PROPERTY TYPES
 CONVERSATION FLOW (STRICT)
 STEP 1 — Determine intent: greet warmly and ask which property the customer is looking for.
 STEP 2 — Buyer flow: ask ONLY for the still-missing fields (budget, property_type, area, size). NEVER re-ask for a field that is already listed in [KNOWN CUSTOMER DATA]. The "purpose" field defaults to "Buy" — only ask about it if the customer mentions renting or investing.
-STEP 3 — Show listings: present listing(s) from [KNOWLEDGE BASE] ONLY when AREA is known AND both budget and property_type are known. Format as a numbered list. Support multiple areas.
-STEP 4 — No-match fallback: if no listing matches, say so honestly and mention the areas that are available from [AVAILABLE AREAS]. Never invent a listing to fill the gap.
-STEP 5 — Wrap up / handoff: set needs_human_followup to true ONLY after listings (or fallback), and only when budget + area + property_type are all known. End with a closing line that contains "Agen kami akan menghubungi Anda". After handoff, do not ask any further questions.
+STEP 3 — Show listings: present [PROPERTY CATALOG] ONLY when AREA is known AND both budget and property_type are known.
+  STEP 3a — PROPERTY LEVEL (always first): list each matching property as ONE bullet line: "• <Project Name> — <City> · <description> · <n> unit tersedia · <price range>". Then on the following indented lines list the block summary from the catalog, each starting with "- ", e.g. "  - Blok A: 8 unit tersedia · Rumah · 84 m² · Rp 1.008.000.000". If several properties match, show all of them, then ask which one the customer wants to see in detail.
+  STEP 3b — UNIT LEVEL (separate paragraph, only when asked): show [UNIT DETAIL] for the chosen property/block as a numbered list, e.g. "1. A1 · Rumah · 84 m² · Rp 1.008.000.000". Reveal unit-level detail ONLY when the customer asks for detail (e.g. "detail", "unit", "tipe", "luas") or names a property/block.
+  - Never dump every unit unprompted; property + block summary comes first.
+STEP 4 — No-match fallback: if no property matches the requested city/type, say so honestly and mention what is actually available (the cities in [AVAILABLE AREAS] and/or the property types present in the city). If properties exist but are above the customer's budget, say so honestly and mention the lowest available price. Never invent a listing to fill the gap.
+STEP 5 — Wrap up / handoff: set needs_human_followup to true ONLY after the property-level listings (or fallback), and only when budget + area + property_type are all known. End with a closing line that contains "Agen kami akan menghubungi Anda". After handoff, do not ask any further questions.
 
 OUTPUT FORMAT
 Reply with ONLY a single valid JSON object (no markdown, no prose) with exactly this shape:
@@ -74,11 +90,14 @@ Reply with ONLY a single valid JSON object (no markdown, no prose) with exactly 
   "needs_human_followup": <boolean>
 }
 
-EXAMPLE — budget known, listing shown then handoff:
-{"reply":"Baik, ada Ruko di Bintaro Jaya yang cocok:\\n\\n1. Ruko | Bintaro Jaya | 90 m² | Rp 1.750.000.000\\n\\nAgen kami akan menghubungi Anda untuk detail selanjutnya.","user_type":"buyer","lead_data":{"name":null,"budget":"2 Miliar","property_type":"Ruko","size":null,"area":"Bintaro Jaya","purpose":"Buy","extra_info":{}},"lead_score":80,"lead_status":"hot","next_action":"human_followup","needs_human_followup":true}
+EXAMPLE — budget + area + type known, property-level listing then handoff:
+{"reply":"Berikut properti Ruko yang cocok di Jakarta Selatan:\\n\\n• Grand Permata Residence — Jakarta Selatan · Cluster premium di Jakarta Selatan · 16 unit tersedia · Rp 1.080.000.000 - Rp 1.350.000.000\\n  - Block Anggrek: 8 unit tersedia · Ruko · 72 m² · Rp 1.080.000.000\\n  - Block Mawar: 8 unit tersedia · Ruko · 90 m² · Rp 1.350.000.000\\n\\nAgen kami akan menghubungi Anda untuk detail selanjutnya.","user_type":"buyer","lead_data":{"name":null,"budget":"2 Miliar","property_type":"Ruko","size":null,"area":"Jakarta Selatan","purpose":"Buy","extra_info":{}},"lead_score":80,"lead_status":"hot","next_action":"human_followup","needs_human_followup":true}
 
 EXAMPLE — budget unknown, must ask:
 {"reply":"Tentu, saya bantu carikan Ruko di Bekasi. Berapa anggaran yang Anda siapkan?","user_type":"buyer","lead_data":{"name":null,"budget":null,"property_type":"Ruko","size":null,"area":"Bekasi","purpose":"Buy","extra_info":{}},"lead_score":60,"lead_status":"hot","next_action":"collect_info","needs_human_followup":false}
+
+EXAMPLE — customer asks for unit detail after the property listing:
+{"reply":"Baik, ini detail unit Grand Permata Residence:\\n\\nBlock Anggrek — Jakarta Selatan\\n1. A-1 · Ruko · 72 m² · Rp 1.080.000.000\\n2. A-2 · Ruko · 72 m² · Rp 1.080.000.000","user_type":"buyer","lead_data":{"name":null,"budget":"2 Miliar","property_type":"Ruko","size":null,"area":"Jakarta Selatan","purpose":"Buy","extra_info":{}},"lead_score":80,"lead_status":"hot","next_action":"collect_info","needs_human_followup":false}
 
 RULES (STRICT)
 1. CLASSIFY EVERY TURN — set user_type="buyer" as soon as there is any buy/rent/invest intent; "unknown" only before that intent appears.
@@ -88,13 +107,14 @@ RULES (STRICT)
 5. lead_score: +20 per filled field (budget, property_type, area, size, purpose). The server recalculates this anyway.
 6. lead_status: score >= 60 "hot", 40-59 "warm", < 40 "cold".
 7. GATE handoff — needs_human_followup=true ONLY when budget, area AND property_type are all known.
-8. ALWAYS show listings or the fallback BEFORE handoff.
-9. Handoff happens only AFTER listings/fallback and must end with "Agen kami akan menghubungi Anda".
-10. Showing listings does NOT replace classification/extraction — still fill user_type and lead_data in the same response.
-11. If user_type="unknown", every lead_data field must be null.
-12. Once needs_human_followup=true, keep it true, ask nothing further, and only send a short closing.
-13. The first handoff response must already contain the listings/fallback AND the closing line.
-14. Respond with ONLY valid JSON {...} — no other text or markdown.`;
+8. ALWAYS show property-level listings or the fallback BEFORE handoff.
+9. Show unit-level detail ONLY when the customer asks for it or names a property/block.
+10. Handoff happens only AFTER listings/fallback and must end with "Agen kami akan menghubungi Anda".
+11. Showing listings does NOT replace classification/extraction — still fill user_type and lead_data in the same response.
+12. If user_type="unknown", every lead_data field must be null.
+13. Once needs_human_followup=true, keep it true, ask nothing further, and only send a short closing.
+14. The first handoff response must already contain the listings/fallback AND the closing line.
+15. Respond with ONLY valid JSON {...} — no other text or markdown.`;
 
 const JSON_BLOCK = /\{[\s\S]*\}/;
 const HANDOFF_CLOSING = 'Baik, agen kami akan menghubungi Anda. Terima kasih.';
@@ -180,39 +200,74 @@ async function persistSession(phone: string, session: AgentSession): Promise<voi
   await saveAgentState(phone, state);
 }
 
-async function buildRagContext(userMessage: string): Promise<string> {
-  const areas = await getKnownAreas();
-  const matchedAreas = detectMatchingAreas(userMessage, areas);
+interface BuiltContext {
+  context: string;
+  matchedCities: string[];
+  knownCities: string[];
+}
 
-  let chunks: RetrievedChunk[] = [];
+async function buildContext(userMessage: string, known: KnownLead): Promise<BuiltContext> {
+  const knownCities = await getKnownAreas();
+  const matchedCities = detectMatchingAreas(userMessage, knownCities);
+
+  let docChunks: RetrievedChunk[] = [];
   try {
-    chunks = await retrieve(userMessage, config.agent.topK);
-    if (matchedAreas.length > 0) {
-      const areaChunks = await retrieve(userMessage, config.agent.topK, {
-        area: { in: matchedAreas },
-      });
-      const seen = new Set(chunks.map((chunk) => chunk.content));
-      for (const chunk of areaChunks) {
-        if (!seen.has(chunk.content)) {
-          seen.add(chunk.content);
-          chunks.push(chunk);
-        }
-      }
-    }
+    docChunks = await retrieve(userMessage, config.agent.topK, {
+      doc_type: DOC_TYPE_DOCUMENT,
+    });
   } catch (error) {
     console.error('[agent] retrieval failed', error);
   }
 
-  const parts: string[] = [];
-  if (areas.length > 0) {
-    parts.push(`[AVAILABLE AREAS]\n${areas.join(', ')}`);
+  const areaValue = hasText(known.area) ? known.area : null;
+  const storedCity = areaValue
+    ? knownCities.find((city) => city.toLowerCase() === areaValue.toLowerCase())
+    : undefined;
+  const cities = matchedCities.length > 0 ? matchedCities : storedCity ? [storedCity] : [];
+
+  let catalog: CatalogProperty[] = [];
+  if (cities.length > 0) {
+    const messageTypes = PROPERTY_TYPES.filter((type) =>
+      new RegExp(`\\b${type}\\b`, 'i').test(userMessage)
+    );
+    const propertyType = hasText(known.property_type)
+      ? known.property_type
+      : messageTypes.length === 1
+        ? messageTypes[0]
+        : undefined;
+    const maxPrice = parseBudgetToIdr(userMessage) ?? parseBudgetToIdr(known.budget);
+
+    try {
+      catalog = await fetchListingCatalog({ cities, propertyType, maxPrice });
+      if (catalog.length === 0) {
+        catalog = await fetchListingCatalog({ cities, propertyType });
+      }
+      if (catalog.length === 0) {
+        catalog = await fetchListingCatalog({ cities });
+      }
+    } catch (error) {
+      console.error('[agent] catalog failed', error);
+    }
   }
-  if (chunks.length > 0) {
+
+  const parts: string[] = [];
+  if (knownCities.length > 0) {
+    parts.push(`[AVAILABLE AREAS]\n${knownCities.join(', ')}`);
+  }
+  if (docChunks.length > 0) {
     parts.push(
-      `[KNOWLEDGE BASE]\n${chunks.map((chunk) => chunk.content).join('\n')}\n[/KNOWLEDGE BASE]`
+      `[KNOWLEDGE BASE]\n${docChunks.map((chunk) => chunk.content).join('\n')}\n[/KNOWLEDGE BASE]`
     );
   }
-  return parts.join('\n\n');
+  if (catalog.length > 0) {
+    parts.push(buildPropertyCatalogBlock(catalog));
+    const totalUnits = catalog.reduce((total, property) => total + property.available_count, 0);
+    if (wantsUnitDetail(userMessage, catalog) || totalUnits <= config.agent.unitDetailLimit) {
+      parts.push(buildUnitDetailBlock(catalog, config.agent.unitDetailLimit));
+    }
+  }
+
+  return { context: parts.join('\n\n'), matchedCities, knownCities };
 }
 
 function buildAugmentedMessage(
@@ -251,8 +306,8 @@ export async function processMessage(input: ProcessMessageInput): Promise<AgentR
     return result;
   }
 
-  const ragContext = await buildRagContext(message);
-  const augmented = buildAugmentedMessage(phone, name, message, session.known, ragContext);
+  const { context, matchedCities, knownCities } = await buildContext(message, session.known);
+  const augmented = buildAugmentedMessage(phone, name, message, session.known, context);
 
   const messagesForLlm: BaseMessage[] = [
     new SystemMessage(SYSTEM_PROMPT),
@@ -273,7 +328,9 @@ export async function processMessage(input: ProcessMessageInput): Promise<AgentR
   }
 
   session.known = mergeLeadData(session.known, result.lead_data);
+  session.known = normalizeArea(session.known, matchedCities, knownCities);
   result.lead_data = { ...result.lead_data, ...backfillLeadData(result.lead_data, session.known) };
+  result.lead_data.area = session.known.area;
   result.lead_score = computeScore(session.known);
   result.lead_status = computeStatus(result.lead_score);
 

@@ -21,6 +21,7 @@ export const config = {
   agent: {
     topK: int(process.env.AGENT_TOP_K, 12),
     maxHistoryTurns: int(process.env.MAX_HISTORY_TURNS, 20),
+    unitDetailLimit: int(process.env.AGENT_UNIT_DETAIL_LIMIT, 30),
   },
 
   chunk: {

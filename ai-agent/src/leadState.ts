@@ -1,9 +1,9 @@
 import { KNOWN_KEYS, SCORED_FIELDS, type KnownKey, type KnownLead, type LeadData } from './types';
 
-const LISTING_LINE_REGEX = /^[ \t]*\d+\.\s/;
+const LISTING_LINE_REGEX = /^[ \t]*(?:\d+[.)]\s|[•*]\s|-{1,2}\s|Property:)/i;
 
 const LISTING_INTRO_REGEX =
-  /(berikut|pilihan|rekomendasi|daftar).{0,40}(properti|listing|unit|rumah|ruko|apartemen)/i;
+  /(berikut|pilihan|rekomendasi|daftar).{0,40}(properti|listing|unit|blok|proyek|rumah|ruko|apartemen)/i;
 
 export const hasText = (value: unknown): value is string =>
   typeof value === 'string' && value.trim().length > 0;
@@ -56,6 +56,24 @@ export const mergeLeadData = (known: KnownLead, incoming: Partial<KnownLead> | n
   return merged;
 };
 
+/**
+ * Area is the property city. When the message resolves to exactly one known
+ * city and the stored area is empty/invalid, normalize it to that city.
+ */
+export const normalizeArea = (
+  known: KnownLead,
+  matchedCities: string[],
+  knownCities: string[]
+): KnownLead => {
+  if (matchedCities.length !== 1) return known;
+
+  const current = known.area;
+  const isValidCity =
+    hasText(current) && knownCities.some((city) => city.toLowerCase() === current.toLowerCase());
+
+  return isValidCity ? known : { ...known, area: matchedCities[0] };
+};
+
 /** Fill per-turn lead_data from the accumulated known values. */
 export const backfillLeadData = (
   incoming: Partial<KnownLead>,
@@ -97,7 +115,8 @@ export const buildKnownDataBlock = (known: KnownLead): string => {
   ].join('\n');
 };
 
-export const containsListingLines = (text: string): boolean => /^[ \t]*\d+\.\s/m.test(text);
+export const containsListingLines = (text: string): boolean =>
+  text.split('\n').some((line) => LISTING_LINE_REGEX.test(line));
 
 export const stripListingLines = (text: string, fallback: string): string => {
   const kept = text

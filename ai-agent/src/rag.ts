@@ -47,10 +47,12 @@ export async function fetchListings(): Promise<ListingRow[]> {
   const result = await pool.query<ListingRow>(
     `SELECT u.id AS unit_id,
             u.name AS unit_name,
+            b.id AS block_id,
             b.name AS block_name,
             p.id AS property_id,
             p.name AS property_name,
             p.city AS area,
+            p.address,
             u.property_type,
             u.land_area,
             u.price,
@@ -72,7 +74,7 @@ export function listingToDocument(row: ListingRow): Document {
   const size = row.land_area !== null ? `${row.land_area} m²` : 'N/A';
   const content = [
     `Property: ${row.property_type}`,
-    `Area: ${row.area}`,
+    `City: ${row.area}`,
     `Size: ${size}`,
     `Price: ${formatPrice(row.price)}`,
     `Project: ${row.property_name} (${row.block_name} - Unit ${row.unit_name})`,
@@ -89,6 +91,8 @@ export function listingToDocument(row: ListingRow): Document {
       size: row.land_area === null ? '' : String(row.land_area),
       price: row.price === null ? 0 : Number(row.price),
       property_name: row.property_name,
+      block_name: row.block_name,
+      unit_name: row.unit_name,
       status: row.status,
     }),
   });

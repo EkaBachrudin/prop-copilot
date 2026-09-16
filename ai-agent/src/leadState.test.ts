@@ -7,6 +7,7 @@ import {
   emptyKnownLead,
   mergeLeadData,
   missingFields,
+  normalizeArea,
   stripListingLines,
 } from './leadState';
 
@@ -87,5 +88,48 @@ describe('missingFields / known block', () => {
     expect(missingFields(known)).toEqual(['budget', 'property_type', 'size', 'purpose']);
     expect(buildKnownDataBlock(known)).toContain('area=Bekasi');
     expect(buildKnownDataBlock(known)).toContain('NEVER ask for them again');
+  });
+});
+
+describe('normalizeArea', () => {
+  const cities = ['Bekasi', 'Jakarta Selatan'];
+
+  it('sets area to the single matched city', () => {
+    const known = normalizeArea(emptyKnownLead(), ['Bekasi'], cities);
+    expect(known.area).toBe('Bekasi');
+  });
+
+  it('replaces a non-city area with the matched city', () => {
+    const known = normalizeArea(
+      { ...emptyKnownLead(), area: 'Bintaro' },
+      ['Jakarta Selatan'],
+      cities
+    );
+    expect(known.area).toBe('Jakarta Selatan');
+  });
+
+  it('keeps a valid city and ignores ambiguous matches', () => {
+    const keept = normalizeArea({ ...emptyKnownLead(), area: 'Bekasi' }, ['Bekasi'], cities);
+    expect(keept.area).toBe('Bekasi');
+
+    const ambiguous = normalizeArea(emptyKnownLead(), ['Bekasi', 'Jakarta Selatan'], cities);
+    expect(ambiguous.area).toBeNull();
+  });
+});
+
+describe('property-level listing gate', () => {
+  const replyWithCatalog =
+    'Berikut properti yang cocok di Bekasi:\n\n• Brassia Garden — Bekasi · Cluster modern · 31 unit tersedia\n  - Blok A: 8 unit tersedia · Rumah · 84 m² · Rp 1.008.000.000\n\nBerapa anggaran Anda?';
+
+  it('detects bulleted property listings', () => {
+    expect(containsListingLines(replyWithCatalog)).toBe(true);
+  });
+
+  it('strips property and block lines but keeps the question', () => {
+    const stripped = stripListingLines(replyWithCatalog, 'fallback');
+
+    expect(stripped).not.toContain('Brassia Garden');
+    expect(stripped).not.toContain('Cluster modern');
+    expect(stripped).toContain('Berapa anggaran Anda?');
   });
 });
