@@ -1,3 +1,4 @@
+import http from 'http';
 import express, { Application, Request, Response } from 'express';
 import cors from 'cors';
 import helmet from 'helmet';
@@ -9,11 +10,19 @@ import { errorHandler } from './middleware/errorHandler';
 import { requestLogger } from './middleware/requestLogger';
 import { generalLimiter } from './middleware/rateLimiter';
 import { AppError } from './utils/AppError';
+import { getAllowedOrigins } from './config/cors';
 import { testConnection, closePool } from './config/database';
+import { initSocketServer } from './socket/server';
 import authRoutes from './routes/authRoutes';
 import propertiesRoutes from './routes/propertiesRoutes';
 import blocksRoutes from './routes/blocksRoutes';
 import unitsRoutes from './routes/unitsRoutes';
+import conversationsRoutes from './routes/conversationsRoutes';
+import messagesRoutes from './routes/messagesRoutes';
+import leadsRoutes from './routes/leadsRoutes';
+import settingsRoutes from './routes/settingsRoutes';
+import ragRoutes from './routes/ragRoutes';
+import webhookRoutes from './routes/webhookRoutes';
 
 dotenv.config();
 
@@ -22,14 +31,6 @@ const PORT = process.env.APP_PORT || 4000;
 const API_VERSION = '/api/v1';
 
 app.set('trust proxy', 1);
-
-const getAllowedOrigins = (): string | string[] => {
-  const corsOrigin = process.env.CORS_ORIGIN;
-  if (!corsOrigin) {
-    return process.env.NODE_ENV === 'production' ? [] : 'http://localhost:3000';
-  }
-  return corsOrigin.split(',').map((origin) => origin.trim());
-};
 
 app.use(
   cors({
@@ -67,11 +68,19 @@ app.get('/', (_req: Request, res: Response) => {
   });
 });
 
+// The Meta webhook must not be rate-limited aggressively (Meta retries).
+app.use(`${API_VERSION}/webhook`, webhookRoutes);
+
 app.use(`${API_VERSION}`, generalLimiter);
 app.use(`${API_VERSION}/auth`, authRoutes);
 app.use(`${API_VERSION}/properties`, propertiesRoutes);
 app.use(`${API_VERSION}`, blocksRoutes);
 app.use(`${API_VERSION}`, unitsRoutes);
+app.use(`${API_VERSION}/conversations`, conversationsRoutes);
+app.use(`${API_VERSION}/messages`, messagesRoutes);
+app.use(`${API_VERSION}`, leadsRoutes);
+app.use(`${API_VERSION}`, settingsRoutes);
+app.use(`${API_VERSION}`, ragRoutes);
 
 app.use((_req: Request, _res: Response, next) => {
   next(new AppError('Route not found', 404, 'NOT_FOUND'));
@@ -86,7 +95,10 @@ const startServer = async () => {
     process.exit(1);
   }
 
-  app.listen(PORT, () => {
+  const httpServer = http.createServer(app);
+  initSocketServer(httpServer);
+
+  httpServer.listen(PORT, () => {
     console.log(`Server running on port ${PORT} in ${process.env.NODE_ENV || 'development'} mode`);
   });
 };

@@ -5,8 +5,10 @@ import { Input } from '../ui/Input';
 import { Select } from '../ui/Select';
 import { useLockBodyScroll } from '../../hooks/useLockBodyScroll';
 import {
+  PROPERTY_TYPE_OPTIONS,
   UNIT_STATUS_OPTIONS,
   type CreateUnitInput,
+  type PropertyType,
   type UnitListItem,
   type UnitStatus,
 } from '../../lib/types';
@@ -22,6 +24,7 @@ interface UnitFormModalProps {
 interface FormErrors {
   name?: string;
   land_area?: string;
+  price?: string;
 }
 
 export function UnitFormModal({
@@ -35,6 +38,8 @@ export function UnitFormModal({
 
   const [name, setName] = useState(unit?.name ?? '');
   const [landArea, setLandArea] = useState(unit?.land_area != null ? String(unit.land_area) : '');
+  const [price, setPrice] = useState(unit?.price != null ? String(unit.price) : '');
+  const [propertyType, setPropertyType] = useState<PropertyType | ''>(unit?.property_type ?? '');
   const [status, setStatus] = useState<UnitStatus>(unit?.status ?? 'available');
   const [errors, setErrors] = useState<FormErrors>({});
 
@@ -53,6 +58,14 @@ export function UnitFormModal({
       }
     }
 
+    let parsedPrice: number | undefined;
+    if (price.trim() !== '') {
+      parsedPrice = Number(price);
+      if (Number.isNaN(parsedPrice) || parsedPrice < 0) {
+        nextErrors.price = 'Enter a non-negative number';
+      }
+    }
+
     if (Object.keys(nextErrors).length > 0) {
       setErrors(nextErrors);
       return;
@@ -61,6 +74,8 @@ export function UnitFormModal({
     await onSubmit({
       name: name.trim(),
       land_area: parsedArea,
+      price: parsedPrice,
+      property_type: propertyType || undefined,
       status,
     });
   };
@@ -109,6 +124,25 @@ export function UnitFormModal({
                   }}
                   error={errors.land_area}
                   placeholder="84"
+                />
+                <Input
+                  label="Price (IDR)"
+                  type="number"
+                  min={0}
+                  step="1000"
+                  value={price}
+                  onChange={(event) => {
+                    setPrice(event.target.value);
+                    if (errors.price) setErrors((current) => ({ ...current, price: undefined }));
+                  }}
+                  error={errors.price}
+                  placeholder="1000000000"
+                />
+                <Select
+                  label="Property Type"
+                  value={propertyType}
+                  onChange={(event) => setPropertyType(event.target.value as PropertyType | '')}
+                  options={PROPERTY_TYPE_OPTIONS}
                 />
                 <Select
                   label="Status"

@@ -1,0 +1,51 @@
+.lead-cell {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.lead-cell__name {
+  font-weight: 600;
+}
+
+.lead-cell__phone {
+  font-size: 12px;
+  color: var(--ink-3);
+  font-family: var(--font-geist-mono);
+}
+
+.lead-badge {
+  display: inline-flex;
+  align-items: center;
+  border-radius: var(--radius-pill);
+  border: 1px solid transparent;
+  padding: 3px 9px;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.01em;
+  white-space: nowrap;
+}
+
+.lead-badge--new {
+  background: var(--surface-2);
+  color: var(--ink-2);
+  border-color: var(--line-strong);
+}
+
+.lead-badge--cold {
+  background: var(--st-booked-soft);
+  color: var(--st-booked-ink);
+  border-color: color-mix(in srgb, var(--st-booked) 24%, transparent);
+}
+
+.lead-badge--warm {
+  background: var(--st-reserved-soft);
+  color: var(--st-reserved-ink);
+  border-color: color-mix(in srgb, var(--st-reserved) 26%, transparent);
+}
+
+.lead-badge--hot {
+  background: var(--st-sold-soft);
+  color: var(--st-sold-ink);
+  border-color: color-mix(in srgb, var(--st-sold) 24%, transparent);
+}

@@ -5,6 +5,8 @@ import {
   CreateUnitDto,
   GetUnitsQuery,
   PaginatedUnitsResponse,
+  PROPERTY_TYPES,
+  PropertyType,
   UNIT_STATUSES,
   Unit,
   UnitListItem,
@@ -14,6 +16,9 @@ import {
 
 const isValidStatus = (value: unknown): value is UnitStatus =>
   typeof value === 'string' && UNIT_STATUSES.includes(value as UnitStatus);
+
+const isValidPropertyType = (value: unknown): value is PropertyType =>
+  typeof value === 'string' && PROPERTY_TYPES.includes(value as PropertyType);
 
 export const getUnits = async (
   blockId: string,
@@ -66,7 +71,7 @@ export const getUnits = async (
   const totalPages = Math.ceil(totalItems / limit);
 
   const rowsResult = await pool.query(
-    `SELECT u.id, u.name, u.land_area, u.status, u.created_at, u.updated_at
+    `SELECT u.id, u.name, u.land_area, u.price, u.property_type, u.status, u.created_at, u.updated_at
      FROM units u
      JOIN blocks b ON b.id = u.block_id
      ${whereClause}`,
@@ -123,6 +128,20 @@ const validateUnitFields = (dto: CreateUnitDto | UpdateUnitDto, isCreate: boolea
     }
   }
 
+  if (dto.price !== undefined) {
+    if (typeof dto.price !== 'number' || Number.isNaN(dto.price) || dto.price < 0) {
+      throw new AppError('Price must be a non-negative number', 400, 'VALIDATION_ERROR', {
+        price: ['Must be a non-negative number'],
+      });
+    }
+  }
+
+  if (dto.property_type !== undefined && !isValidPropertyType(dto.property_type)) {
+    throw new AppError('Invalid property type', 400, 'VALIDATION_ERROR', {
+      property_type: [`Must be one of: ${PROPERTY_TYPES.join(', ')}`],
+    });
+  }
+
   if (dto.status !== undefined && !isValidStatus(dto.status)) {
     throw new AppError('Invalid unit status', 400, 'VALIDATION_ERROR', {
       status: [`Must be one of: ${UNIT_STATUSES.join(', ')}`],
@@ -149,10 +168,17 @@ export const createUnit = async (blockId: string, dto: CreateUnitDto): Promise<U
   }
 
   const result = await pool.query(
-    `INSERT INTO units (block_id, name, land_area, status, created_at, updated_at)
-     VALUES ($1, $2, $3, $4, NOW(), NOW())
+    `INSERT INTO units (block_id, name, land_area, price, property_type, status, created_at, updated_at)
+     VALUES ($1, $2, $3, $4, $5, $6, NOW(), NOW())
      RETURNING *`,
-    [blockId, dto.name!.trim(), dto.land_area ?? null, dto.status ?? 'available']
+    [
+      blockId,
+      dto.name!.trim(),
+      dto.land_area ?? null,
+      dto.price ?? null,
+      dto.property_type ?? null,
+      dto.status ?? 'available',
+    ]
   );
 
   return result.rows[0] as Unit;
@@ -168,7 +194,11 @@ export const updateUnit = async (unitId: string, dto: UpdateUnitDto): Promise<Un
   validateUnitFields(dto, false);
 
   const hasField =
-    dto.name !== undefined || dto.land_area !== undefined || dto.status !== undefined;
+    dto.name !== undefined ||
+    dto.land_area !== undefined ||
+    dto.price !== undefined ||
+    dto.property_type !== undefined ||
+    dto.status !== undefined;
   if (!hasField) {
     throw new AppError('At least one field must be provided', 400, 'VALIDATION_ERROR');
   }
@@ -189,11 +219,20 @@ export const updateUnit = async (unitId: string, dto: UpdateUnitDto): Promise<Un
     `UPDATE units
      SET name = COALESCE($2, name),
          land_area = COALESCE($3, land_area),
-         status = COALESCE($4, status),
+         price = COALESCE($4, price),
+         property_type = COALESCE($5, property_type),
+         status = COALESCE($6, status),
          updated_at = NOW()
      WHERE id = $1
      RETURNING *`,
-    [unitId, dto.name?.trim(), dto.land_area ?? null, dto.status ?? null]
+    [
+      unitId,
+      dto.name?.trim(),
+      dto.land_area ?? null,
+      dto.price ?? null,
+      dto.property_type ?? null,
+      dto.status ?? null,
+    ]
   );
 
   return result.rows[0] as Unit;

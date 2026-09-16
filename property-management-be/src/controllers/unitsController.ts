@@ -35,6 +35,8 @@ export const createUnitController = async (req: Request, res: Response): Promise
   const dto: CreateUnitDto = {
     name: req.body.name,
     land_area: parseLandArea(req.body.land_area),
+    price: parseLandArea(req.body.price),
+    property_type: req.body.property_type,
     status: req.body.status,
   };
 
@@ -46,6 +48,8 @@ export const updateUnitController = async (req: Request, res: Response): Promise
   const dto: UpdateUnitDto = {
     name: req.body.name,
     land_area: parseLandArea(req.body.land_area),
+    price: parseLandArea(req.body.price),
+    property_type: req.body.property_type,
     status: req.body.status,
   };
 

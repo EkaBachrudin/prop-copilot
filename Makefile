@@ -9,10 +9,11 @@ POSTGRES_USER ?= postgres
 POSTGRES_DB ?= property_management
 APP_PORT ?= 4000
 FE_PORT ?= 3000
+AGENT_PORT ?= 5000
 
 .DEFAULT_GOAL := up
 
-.PHONY: up down restart build logs ps migrate migrate-status migrate-rollback seed psql be-shell fe-shell clean help
+.PHONY: up down restart build logs ps migrate migrate-status migrate-rollback seed psql be-shell fe-shell agent-shell backfill reindex reset-leads reset-agent clean help
 
 up: ## Build and start all services (db + backend + frontend)
 	$(COMPOSE) up --build -d
@@ -20,6 +21,7 @@ up: ## Build and start all services (db + backend + frontend)
 	@echo "All services started:"
 	@echo "  Frontend : http://localhost:$(FE_PORT)"
 	@echo "  Backend  : http://localhost:$(APP_PORT)"
+	@echo "  AI agent : http://localhost:$(AGENT_PORT)"
 	@echo "  Health   : http://localhost:$(APP_PORT)/health"
 	@echo "  Login    : admin@example.com / Admin123"
 
@@ -57,6 +59,25 @@ be-shell: ## Shell into the backend container
 
 fe-shell: ## Shell into the frontend container
 	$(COMPOSE) exec frontend sh
+
+agent-shell: ## Shell into the ai-agent container
+	$(COMPOSE) exec ai-agent sh
+
+backfill: ## Rebuild the RAG vector store from listings + documents (idempotent)
+	$(COMPOSE) exec ai-agent npm run rag:reindex
+
+reindex: backfill ## Alias for backfill
+
+reset-leads: ## Drop leads/conversations/messages (keeps properties & listings)
+	$(COMPOSE) exec -T db psql -U $(POSTGRES_USER) -d $(POSTGRES_DB) \
+		-c "TRUNCATE messages, leads, conversations RESTART IDENTITY CASCADE;"
+	@echo "Leads, conversations and messages cleared."
+
+reset-agent: ## Restart the AI agent and re-enable agent_run for all conversations
+	$(COMPOSE) restart ai-agent
+	$(COMPOSE) exec -T db psql -U $(POSTGRES_USER) -d $(POSTGRES_DB) \
+		-c "UPDATE conversations SET agent_run = true;"
+	@echo "AI agent restarted and agent_run reset to true."
 
 clean: ## Stop services and delete volumes (database data)
 	$(COMPOSE) down -v

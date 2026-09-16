@@ -1,0 +1,99 @@
+.wa-banner {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 16px;
+  padding: 12px 14px;
+  border: 1px solid transparent;
+  border-radius: var(--radius-md);
+  font-size: 13px;
+}
+
+.wa-banner--test {
+  background: var(--st-reserved-soft);
+  border-color: color-mix(in srgb, var(--st-reserved) 26%, transparent);
+  color: var(--st-reserved-ink);
+}
+
+.wa-banner--live {
+  background: var(--st-available-soft);
+  border-color: color-mix(in srgb, var(--st-available) 24%, transparent);
+  color: var(--st-available-ink);
+}
+
+.wa-toggle-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 18px 20px;
+}
+
+.wa-toggle-row__label {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.wa-form {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 16px;
+  padding: 20px;
+}
+
+@media (min-width: 768px) {
+  .wa-form {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+.toggle {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  cursor: pointer;
+}
+
+.toggle input {
+  position: absolute;
+  width: 0;
+  height: 0;
+  opacity: 0;
+}
+
+.toggle__track {
+  position: relative;
+  display: inline-block;
+  width: 42px;
+  height: 24px;
+  border-radius: var(--radius-pill);
+  background: var(--line-strong);
+  transition: background-color var(--dur) var(--ease);
+}
+
+.toggle input:checked + .toggle__track {
+  background: var(--primary);
+}
+
+.toggle input:focus-visible + .toggle__track {
+  outline: 2px solid var(--primary);
+  outline-offset: 2px;
+}
+
+.toggle__thumb {
+  position: absolute;
+  top: 3px;
+  left: 3px;
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  background: #ffffff;
+  transition: transform var(--dur) var(--ease);
+}
+
+.toggle input:checked + .toggle__track .toggle__thumb {
+  transform: translateX(18px);
+}

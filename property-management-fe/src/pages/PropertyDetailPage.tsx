@@ -16,7 +16,7 @@ import { useBlockMutations } from '../hooks/useBlocks';
 import { useUnits, useUnitMutations } from '../hooks/useUnits';
 import { useDebounce } from '../hooks/useDebounce';
 import { useToast } from '../contexts/ToastContext';
-import { formatArea, pluralize } from '../lib/utils';
+import { formatArea, formatCurrency, pluralize } from '../lib/utils';
 import {
   UNIT_STATUS_OPTIONS,
   unitStatusLabel,
@@ -464,7 +464,7 @@ export function PropertyDetailPage() {
 
           <div className="content-card">
             {unitsQuery.isLoading ? (
-              <TableSkeleton columns={4} />
+              <TableSkeleton columns={6} />
             ) : unitsQuery.isError ? (
               <div className="empty-state">
                 <span className="empty-state__icon">
@@ -491,6 +491,8 @@ export function PropertyDetailPage() {
                     <tr>
                       <th>Unit</th>
                       <th className="data-table__right">Land Area</th>
+                      <th className="data-table__right">Price</th>
+                      <th>Type</th>
                       <th>Status</th>
                       <th className="data-table__right">Actions</th>
                     </tr>
@@ -500,6 +502,8 @@ export function PropertyDetailPage() {
                       <tr key={unit.id}>
                         <td className="font-medium">{unit.name}</td>
                         <td className="data-table__num">{formatArea(unit.land_area)}</td>
+                        <td className="data-table__num">{formatCurrency(unit.price)}</td>
+                        <td>{unit.property_type ?? '-'}</td>
                         <td>
                           <span className={`status-badge status-badge--${unit.status}`}>
                             <span className="status-badge__dot" aria-hidden="true" />

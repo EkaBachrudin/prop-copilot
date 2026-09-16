@@ -1,20 +1,33 @@
 import type {
   Block,
   BlockInfo,
+  Conversation,
+  CreateConversationInput,
   CreatePropertyInput,
   CreateUnitInput,
+  Lead,
+  LeadStatus,
+  Message,
   PaginationMeta,
   Property,
   PropertyDetail,
   PropertyListItem,
   PublicUser,
+  RagDocument,
+  RagSearchResult,
+  RagStats,
+  SendMessageInput,
+  SimulateMessageInput,
   UnitListItem,
   UnitStatus,
+  UpdateConversationInput,
   UpdatePropertyInput,
   UpdateUnitInput,
+  UpdateWhatsAppSettingsInput,
+  WhatsAppSettings,
 } from './types';
 
-const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:4000';
+export const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:4000';
 
 export class ApiError extends Error {
   statusCode: number;
@@ -40,11 +53,13 @@ interface ErrorEnvelope {
 }
 
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
+  const isFormData = typeof FormData !== 'undefined' && init?.body instanceof FormData;
+
   const response = await fetch(`${API_URL}${path}`, {
     ...init,
     credentials: 'include',
     headers: {
-      'Content-Type': 'application/json',
+      ...(isFormData ? {} : { 'Content-Type': 'application/json' }),
       ...(init?.headers ?? {}),
     },
   });
@@ -118,6 +133,81 @@ interface UnitsResponse {
   data: { block: BlockInfo; units: UnitListItem[]; pagination: PaginationMeta };
 }
 
+interface ConversationsResponse {
+  success: true;
+  data: { conversations: Conversation[]; pagination: PaginationMeta };
+}
+
+interface ConversationResponse {
+  success: true;
+  data: { conversation: Conversation; existed?: boolean };
+}
+
+interface MessagesResponse {
+  success: true;
+  data: { messages: Message[]; pagination: PaginationMeta };
+}
+
+interface MessageSingleResponse {
+  success: true;
+  data: { message: Message };
+}
+
+interface SimulateResponse {
+  success: true;
+  data: {
+    conversation: Conversation;
+    incomingMessage: Message | null;
+    replyMessage: Message | null;
+    skipped: boolean;
+  };
+}
+
+interface LeadsResponse {
+  success: true;
+  data: { leads: Lead[]; pagination: PaginationMeta };
+}
+
+interface ToggleLeadResponse {
+  success: true;
+  data: { lead: Lead; conversation: Conversation; agent_enabled: boolean };
+}
+
+interface WhatsappStatusResponse {
+  success: true;
+  whatsapp_enabled: boolean;
+}
+
+interface WhatsappSetupResponse {
+  success: true;
+  data: { settings: WhatsAppSettings };
+}
+
+interface RagDocumentsResponse {
+  success: true;
+  data: { documents: RagDocument[] };
+}
+
+interface RagStatsResponse {
+  success: true;
+  data: RagStats;
+}
+
+interface RagUploadResponse {
+  success: true;
+  data: { document: RagDocument; chunks: number };
+}
+
+interface RagSearchResponse {
+  success: true;
+  data: { results: RagSearchResult[] };
+}
+
+interface ReindexResponse {
+  success: true;
+  data: { listings: number; documentChunks: number };
+}
+
 export interface ListPropertiesParams {
   page?: number;
   limit?: number;
@@ -130,6 +220,25 @@ export interface ListUnitsParams {
   limit?: number;
   status?: UnitStatus;
   search?: string;
+}
+
+export interface ListConversationsParams {
+  page?: number;
+  limit?: number;
+  search?: string;
+}
+
+export interface ListLeadsParams {
+  page?: number;
+  limit?: number;
+  status?: LeadStatus;
+  search?: string;
+}
+
+export interface ListMessagesParams {
+  conversation_id: string;
+  page?: number;
+  limit?: number;
 }
 
 export const api = {
@@ -196,4 +305,104 @@ export const api = {
 
   deleteUnit: (unitId: string) =>
     request<MessageResponse>(`/api/v1/units/${unitId}`, { method: 'DELETE' }),
+
+  // -------------------------------------------------------------------------
+  // Conversations
+  // -------------------------------------------------------------------------
+  getConversations: (params: ListConversationsParams = {}) =>
+    request<ConversationsResponse>(`/api/v1/conversations${qs({ ...params })}`),
+
+  getConversation: (id: string) =>
+    request<ConversationResponse>(`/api/v1/conversations/${id}`),
+
+  createConversation: (input: CreateConversationInput) =>
+    request<ConversationResponse>('/api/v1/conversations/create', {
+      method: 'POST',
+      body: JSON.stringify(input),
+    }),
+
+  updateConversation: (input: UpdateConversationInput) =>
+    request<ConversationResponse>('/api/v1/conversations/update', {
+      method: 'POST',
+      body: JSON.stringify(input),
+    }),
+
+  clearConversation: (conversationId: string) =>
+    request<MessageResponse>('/api/v1/conversations/clear', {
+      method: 'POST',
+      body: JSON.stringify({ conversation_id: conversationId }),
+    }),
+
+  deleteConversation: (conversationId: string) =>
+    request<MessageResponse>('/api/v1/conversations/delete', {
+      method: 'POST',
+      body: JSON.stringify({ conversation_id: conversationId }),
+    }),
+
+  // -------------------------------------------------------------------------
+  // Messages
+  // -------------------------------------------------------------------------
+  getMessages: (params: ListMessagesParams) =>
+    request<MessagesResponse>(`/api/v1/messages${qs({ ...params })}`),
+
+  sendMessage: (input: SendMessageInput) =>
+    request<MessageSingleResponse>('/api/v1/messages/send', {
+      method: 'POST',
+      body: JSON.stringify(input),
+    }),
+
+  simulateMessage: (input: SimulateMessageInput) =>
+    request<SimulateResponse>('/api/v1/messages/simulate', {
+      method: 'POST',
+      body: JSON.stringify(input),
+    }),
+
+  // -------------------------------------------------------------------------
+  // Leads
+  // -------------------------------------------------------------------------
+  getLeads: (params: ListLeadsParams = {}) =>
+    request<LeadsResponse>(`/api/v1/leads${qs({ ...params })}`),
+
+  toggleLeadAgent: (leadId: string) =>
+    request<ToggleLeadResponse>(`/api/v1/lead/${leadId}/toogle-agent`, { method: 'PATCH' }),
+
+  // -------------------------------------------------------------------------
+  // WhatsApp settings
+  // -------------------------------------------------------------------------
+  getWhatsappStatus: () => request<WhatsappStatusResponse>('/api/v1/whatsapp/status'),
+
+  getWhatsappSetup: () => request<WhatsappSetupResponse>('/api/v1/whatsapp/setup'),
+
+  updateWhatsappSetup: (input: UpdateWhatsAppSettingsInput) =>
+    request<WhatsappSetupResponse>('/api/v1/whatsapp/setup', {
+      method: 'POST',
+      body: JSON.stringify(input),
+    }),
+
+  // -------------------------------------------------------------------------
+  // RAG knowledge base
+  // -------------------------------------------------------------------------
+  getRagDocuments: () =>
+    request<RagDocumentsResponse>('/api/v1/rag/documents'),
+
+  getRagStats: () =>
+    request<RagStatsResponse>('/api/v1/rag/stats'),
+
+  uploadRagDocument: (file: File) => {
+    const form = new FormData();
+    form.append('file', file);
+    return request<RagUploadResponse>('/api/v1/rag/upload', { method: 'POST', body: form });
+  },
+
+  deleteRagDocument: (id: string) =>
+    request<MessageResponse>(`/api/v1/rag/documents/${id}`, { method: 'DELETE' }),
+
+  searchRag: (query: string, k?: number) =>
+    request<RagSearchResponse>('/api/v1/rag/search', {
+      method: 'POST',
+      body: JSON.stringify({ query, k }),
+    }),
+
+  reindexRag: () =>
+    request<ReindexResponse>('/api/v1/rag/reindex', { method: 'POST' }),
 };

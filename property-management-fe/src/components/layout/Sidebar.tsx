@@ -1,4 +1,15 @@
-import { Building2, ChevronLeft, ChevronRight, Settings, X, type LucideIcon } from 'lucide-react';
+import {
+  BookOpen,
+  Building2,
+  ChevronLeft,
+  ChevronRight,
+  MessageCircle,
+  MessageSquare,
+  Settings,
+  Users,
+  X,
+  type LucideIcon,
+} from 'lucide-react';
 import { NavLink } from 'react-router-dom';
 import { cn } from '../../lib/utils';
 import './Sidebar.css';
@@ -14,11 +25,16 @@ interface NavItem {
   label: string;
   icon: LucideIcon;
   route: string;
+  end?: boolean;
 }
 
 const NAV_ITEMS: NavItem[] = [
   { label: 'Properties', icon: Building2, route: '/properties' },
-  { label: 'Settings', icon: Settings, route: '/settings' },
+  { label: 'Conversations', icon: MessageSquare, route: '/conversations' },
+  { label: 'Leads', icon: Users, route: '/leads' },
+  { label: 'Knowledge Base', icon: BookOpen, route: '/knowledge-base' },
+  { label: 'WhatsApp', icon: MessageCircle, route: '/settings/whatsapp' },
+  { label: 'Settings', icon: Settings, route: '/settings', end: true },
 ];
 
 export function Sidebar({
@@ -61,6 +77,7 @@ export function Sidebar({
             <NavLink
               key={item.route}
               to={item.route}
+              end={item.end}
               onClick={onClose}
               title={collapsed ? item.label : undefined}
               aria-label={item.label}
