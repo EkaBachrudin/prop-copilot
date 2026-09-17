@@ -1,5 +1,5 @@
-import { pool } from './db';
-import type { KnownProperty } from './types';
+import { pool } from '../shared/db';
+import type { KnownProperty } from '../shared/types';
 
 const CACHE_TTL_MS = 5 * 60 * 1000;
 const FUZZY_MAX_DISTANCE = 1;

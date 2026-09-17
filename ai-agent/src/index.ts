@@ -2,19 +2,19 @@ import cors from 'cors';
 import express, { type NextFunction, type Request, type Response } from 'express';
 import multer from 'multer';
 import { z } from 'zod';
-import { processMessage, resetSession } from './agent';
-import { config } from './config';
-import { closePool, ensureVectorExtension, testConnection } from './db';
-import { deleteDocument, insertDocument, listDocuments } from './documents';
-import { extractPdfText } from './pdfText';
+import { processMessage, resetSession } from './agent/agent';
+import { config } from './shared/config';
+import { closePool, ensureVectorExtension, testConnection } from './shared/db';
+import { deleteDocument, insertDocument, listDocuments } from './rag/documents';
+import { extractPdfText } from './rag/pdfText';
 import {
   getRagStats,
   ingestDocumentText,
   reindex,
   removeDocumentEmbeddings,
   retrieve,
-} from './rag';
-import { getVectorStore } from './vectorstore';
+} from './rag/rag';
+import { getVectorStore } from './rag/vectorstore';
 
 const app = express();
 

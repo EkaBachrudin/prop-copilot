@@ -1,12 +1,12 @@
-import { pool } from './db';
-import { formatPrice } from './rag';
+import { pool } from '../shared/db';
+import { formatPrice } from '../rag/rag';
 import type {
   CatalogBlock,
   CatalogProperty,
   CatalogUnit,
   ListingFilters,
   ListingRow,
-} from './types';
+} from '../shared/types';
 
 const DETAIL_KEYWORDS = [
   'detail',

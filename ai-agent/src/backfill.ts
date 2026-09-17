@@ -1,6 +1,6 @@
-import { closePool, ensureVectorExtension, testConnection } from './db';
-import { reindex } from './rag';
-import { closeVectorStore } from './vectorstore';
+import { closePool, ensureVectorExtension, testConnection } from './shared/db';
+import { reindex } from './rag/rag';
+import { closeVectorStore } from './rag/vectorstore';
 
 async function main(): Promise<void> {
   const connected = await testConnection();

@@ -1,21 +1,24 @@
 # Property Management Clone — Documentation
 
-Complete blueprint and source for regenerating a **standalone Property Management
-application** extracted from the Sales Force Automation project. The clone keeps only
-**authentication** and **property management** (Properties → Blocks → Units) with
-**table UIs**, and removes every other feature.
+Blueprint and source documentation for the **Property Lead Management** application. The
+project covers **authentication**, **property management** (Properties → Blocks → Units),
+and an **AI sales agent + lead management** stack (WhatsApp conversations, leads, and a
+RAG knowledge base).
 
-> **Scope:** login / logout / current-user, plus CRUD for properties, blocks, and units.
-> **Not included:** leads, kanban/pipeline, dashboard, analytics, reminders, WhatsApp,
-> subscriptions, user administration, settings, and siteplan upload.
+> **Scope:** login / logout / current-user, CRUD for properties/blocks/units, WhatsApp
+> conversation handling, AI lead extraction & scoring, and a pgvector-backed RAG
+> knowledge base.
+> **Not included:** kanban/pipeline board, analytics dashboard, reminders, subscriptions,
+> and user administration.
 
 ## Tech stack
 
 | Layer | Stack |
 | --- | --- |
-| Backend | Node 20, TypeScript, Express 5, PostgreSQL (`pg`), JWT (httpOnly cookie), bcrypt |
-| Frontend | React 19, Vite 8, TypeScript, React Router 7, TanStack React Query 5, Tailwind CSS v4 |
-| Database | PostgreSQL 16, custom SQL migration runner |
+| Backend | Node 20, TypeScript, Express 5, PostgreSQL (`pg`), Socket.IO, JWT (httpOnly cookie), bcrypt |
+| AI service | Node 20, TypeScript, Express 5, LangChain, OpenAI, pgvector |
+| Frontend | React 19, Vite 8, TypeScript, React Router 7, TanStack React Query 5, Socket.IO client, Tailwind CSS v4 |
+| Database | PostgreSQL 16 (+ pgvector), custom SQL migration runner |
 
 ## Documents
 
@@ -26,6 +29,7 @@ application** extracted from the Sales Force Automation project. The clone keeps
 | 3 | [03-BACKEND.md](./03-BACKEND.md) | Every backend file (configs, middleware, utils, routes, controllers, services) + API reference + error codes. |
 | 4 | [04-FRONTEND.md](./04-FRONTEND.md) | Every frontend file (configs, design system, API client, contexts, hooks, UI kit, layout, modals, table pages). |
 | 5 | [05-REGENERATION-PROMPT.md](./05-REGENERATION-PROMPT.md) | A single copy-paste master prompt that regenerates the whole project in a fresh directory. |
+| 6 | [06-AI-LEAD-MANAGEMENT.md](./06-AI-LEAD-MANAGEMENT.md) | Implementasi aktual AI agent + RAG (pgvector), pipeline WhatsApp & lead management end-to-end, konfigurasi, dan testing. |
 
 ## Regenerate the project
 

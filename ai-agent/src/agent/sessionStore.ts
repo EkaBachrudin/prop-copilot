@@ -1,8 +1,8 @@
 import { AIMessage, HumanMessage, type BaseMessage } from '@langchain/core/messages';
-import { config } from './config';
-import { pool } from './db';
+import { config } from '../shared/config';
+import { pool } from '../shared/db';
 import { emptyKnownLead, normalizeKnownLead } from './leadState';
-import type { StoredAgentState } from './types';
+import type { StoredAgentState } from '../shared/types';
 
 const MAX_HISTORY_MESSAGES = config.agent.maxHistoryTurns * 2;
 

@@ -1,11 +1,11 @@
 import { Document } from '@langchain/core/documents';
 import { RecursiveCharacterTextSplitter } from '@langchain/textsplitters';
 import type { PGVectorStore } from '@langchain/pgvector';
-import { config } from './config';
-import { pool } from './db';
+import { config } from '../shared/config';
+import { pool } from '../shared/db';
 import { getDocumentsForReindex } from './documents';
 import { extractPdfText } from './pdfText';
-import type { ListingRow, RetrievedChunk } from './types';
+import type { ListingRow, RetrievedChunk } from '../shared/types';
 import { getVectorStore } from './vectorstore';
 
 export const DOC_TYPE_INVENTORY = 'inventory';

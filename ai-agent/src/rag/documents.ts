@@ -1,5 +1,5 @@
-import { pool } from './db';
-import type { DocumentRow } from './types';
+import { pool } from '../shared/db';
+import type { DocumentRow } from '../shared/types';
 
 export interface DocumentReindexRow {
   id: string;

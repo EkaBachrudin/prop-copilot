@@ -1,4 +1,10 @@
-import { KNOWN_KEYS, SCORED_FIELDS, type KnownKey, type KnownLead, type LeadData } from './types';
+import {
+  KNOWN_KEYS,
+  SCORED_FIELDS,
+  type KnownKey,
+  type KnownLead,
+  type LeadData,
+} from '../shared/types';
 
 const LISTING_LINE_REGEX = /^[ \t]*(?:\d+[.)]\s|[•*]\s|-{1,2}\s|Property:)/i;
 

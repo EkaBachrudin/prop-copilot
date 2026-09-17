@@ -1,12 +1,12 @@
 import { AIMessage, HumanMessage, SystemMessage, type BaseMessage } from '@langchain/core/messages';
 import { ChatOpenAI } from '@langchain/openai';
-import { config } from './config';
+import { config } from '../shared/config';
 import {
   detectMatchingAreas,
   detectMatchingProperties,
   getKnownAreas,
   getKnownProperties,
-} from './areas';
+} from '../catalog/areas';
 import { parseBudgetToIdr } from './budget';
 import { enforceHandoffGate } from './handoff';
 import {
@@ -28,8 +28,8 @@ import {
   buildUnitDetailBlock,
   fetchListingCatalog,
   wantsUnitDetail,
-} from './listings';
-import { DOC_TYPE_DOCUMENT, retrieve } from './rag';
+} from '../catalog/listings';
+import { DOC_TYPE_DOCUMENT, retrieve } from '../rag/rag';
 import {
   clearAgentState,
   deserializeHistory,
@@ -37,7 +37,7 @@ import {
   saveAgentState,
   serializeHistory,
 } from './sessionStore';
-import { PROPERTY_TYPES } from './types';
+import { PROPERTY_TYPES } from '../shared/types';
 import type {
   AgentResult,
   AgentSession,
@@ -46,7 +46,7 @@ import type {
   KnownProperty,
   RetrievedChunk,
   StoredAgentState,
-} from './types';
+} from '../shared/types';
 
 const SYSTEM_PROMPT = `You are a professional, warm sales consultant for an Indonesian property company. You represent the company on WhatsApp. NEVER say you are an AI, bot, or language model — always sound like a helpful human sales agent.
 

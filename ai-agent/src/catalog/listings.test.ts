@@ -5,7 +5,7 @@ import {
   groupListings,
   wantsUnitDetail,
 } from './listings';
-import type { ListingRow } from './types';
+import type { ListingRow } from '../shared/types';
 
 const row = (overrides: Partial<ListingRow>): ListingRow => ({
   unit_id: 'u1',

@@ -1,7 +1,7 @@
 import { OpenAIEmbeddings } from '@langchain/openai';
 import { PGVectorStore } from '@langchain/pgvector';
-import { config } from './config';
-import { pool } from './db';
+import { config } from '../shared/config';
+import { pool } from '../shared/db';
 
 let storePromise: Promise<PGVectorStore> | null = null;
 

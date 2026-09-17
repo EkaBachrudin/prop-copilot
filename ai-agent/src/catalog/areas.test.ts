@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { detectMatchingAreas, detectMatchingProperties } from './areas';
-import type { KnownProperty } from './types';
+import type { KnownProperty } from '../shared/types';
 
 const properties: KnownProperty[] = [
   { id: 'p1', name: 'Brassia Garden', city: 'Bekasi' },
