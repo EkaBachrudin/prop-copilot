@@ -1,33 +1,32 @@
-import { closePool, ensureVectorExtension, testConnection } from './shared/db';
-import { reindex } from './rag/rag';
-import { closeVectorStore } from './rag/vectorstore';
-
-async function main(): Promise<void> {
-  const connected = await testConnection();
-  if (!connected) {
-    console.error('[backfill] database unreachable');
-    process.exitCode = 1;
-    return;
-  }
-
-  await ensureVectorExtension();
-  const result = await reindex();
-  console.log(
-    `[backfill] listings embedded: ${result.listings}, document chunks embedded: ${result.documentChunks}`
-  );
-}
+import { createContainer } from './composition/container';
 
 const command = process.argv[2] || 'run';
 
 if (command === 'run') {
+  const container = createContainer();
+
+  const main = async (): Promise<void> => {
+    try {
+      await container.startup();
+    } catch (error) {
+      console.error('[backfill] database unreachable', error);
+      process.exitCode = 1;
+      return;
+    }
+
+    const result = await container.rag.reindex();
+    console.log(
+      `[backfill] listings embedded: ${result.listings}, document chunks embedded: ${result.documentChunks}`
+    );
+  };
+
   main()
     .catch((error) => {
       console.error('[backfill] failed', error);
       process.exitCode = 1;
     })
     .finally(async () => {
-      const storeClosed = await closeVectorStore();
-      if (!storeClosed) await closePool();
+      await container.shutdown();
       process.exit(process.exitCode ?? 0);
     });
 } else {

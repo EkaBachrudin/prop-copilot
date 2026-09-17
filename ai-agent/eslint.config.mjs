@@ -24,5 +24,37 @@ export default tseslint.config(
         { argsIgnorePattern: '^_', varsIgnorePattern: '^_' },
       ],
     },
+  },
+  {
+    files: ['src/domain/**/*.ts', 'src/application/**/*.ts'],
+    rules: {
+      'no-restricted-imports': [
+        'error',
+        {
+          patterns: [
+            {
+              group: [
+                '@langchain/*',
+                'openai',
+                'pg',
+                'express',
+                'multer',
+                'cors',
+                'zod',
+                'dotenv',
+                'pdf-parse',
+              ],
+              message:
+                'Domain/application must stay framework-agnostic. Put adapter code under src/infrastructure.',
+            },
+            {
+              group: ['**/infrastructure/**', '**/presentation/**', '**/composition/**'],
+              message:
+                'Depend inward only (domain <- application). Adapters belong under src/infrastructure.',
+            },
+          ],
+        },
+      ],
+    },
   }
 );

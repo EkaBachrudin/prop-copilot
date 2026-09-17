@@ -364,7 +364,7 @@ export const api = {
     request<LeadsResponse>(`/api/v1/leads${qs({ ...params })}`),
 
   toggleLeadAgent: (leadId: string) =>
-    request<ToggleLeadResponse>(`/api/v1/lead/${leadId}/toogle-agent`, { method: 'PATCH' }),
+    request<ToggleLeadResponse>(`/api/v1/lead/${leadId}/toggle-agent`, { method: 'PATCH' }),
 
   // -------------------------------------------------------------------------
   // WhatsApp settings

@@ -168,7 +168,7 @@ Dua-duanya ada di `agentPipeline.ts` dan merupakan duplikasi sengaja dari helper
 ### 3.5 Auto-disable & toggle agent
 
 - Handoff otomatis mematikan agent (`agent_run = false`).
-- `PATCH /api/v1/lead/:id/toogle-agent` (`toggleLeadAgentController`) membalik
+- `PATCH /api/v1/lead/:id/toggle-agent` (`toggleLeadAgentController`) membalik
   `needs_human_followup` lead dan menyetel `conversations.agent_run` agar konsisten. Bila
   agent diaktifkan kembali, `resetAgentSession(phone)` dijalankan untuk membersihkan sesi
   agent.
@@ -229,7 +229,7 @@ Base path `/api/v1`; semua route (kecuali webhook) memerlukan cookie `access_tok
 | POST | `/messages/send` | Kirim pesan manual sebagai `consultant`. |
 | POST | `/messages/simulate` | Suntik pesan pelanggan (test mode). |
 | GET | `/leads` | Daftar lead (filter `status`, `search`). |
-| PATCH | `/lead/:id/toogle-agent` | Toggle handoff/agent per lead. |
+| PATCH | `/lead/:id/toggle-agent` | Toggle handoff/agent per lead. |
 | GET | `/whatsapp/status` | Status integrasi WhatsApp. |
 | GET | `/whatsapp/setup` | Baca konfigurasi WhatsApp. |
 | POST | `/whatsapp/setup` | Update konfigurasi WhatsApp. |
@@ -250,33 +250,65 @@ Base path `/api/v1`; semua route (kecuali webhook) memerlukan cookie `access_tok
 
 ### 4.1 Struktur folder & tanggung jawab
 
+Service ini memakai pemisahan **business logic** vs **app logic** (ports & adapters),
+sehingga aturan bisnis tidak bergantung pada Express/PostgreSQL/OpenAI dan mudah
+dipindah ke tempat lain:
+
 ```
 ai-agent/src/
-├── index.ts                 # Bootstrap Express + seluruh route HTTP
-├── backfill.ts              # CLI reindex RAG (npm run rag:reindex)
-├── shared/
-│   ├── config.ts            # Konfigurasi env (OpenAI, agent, chunk, vector, db)
-│   ├── db.ts                # pg Pool + ensureVectorExtension/testConnection/closePool
-│   └── types.ts             # Tipe domain & kontrak AgentResult
-├── agent/
-│   ├── agent.ts             # processMessage/resetSession, prompt, orkestrasi
-│   ├── leadState.ts         # Normalisasi, merge, scoring, gate listing
-│   ├── handoff.ts           # Deterministic gate handoff
-│   ├── budget.ts            # Parser budget bebas teks → IDR
-│   └── sessionStore.ts      # Persistensi sesi ke conversations.agent_state
-├── catalog/
-│   ├── listings.ts          # Query listing + builder katalog/unit detail
-│   └── areas.ts             # Pencocokan area & proyek toleran typo
-└── rag/
-    ├── rag.ts               # Embedding, ingest, retrieval, reindex, stats
-    ├── vectorstore.ts       # Inisialisasi PGVectorStore + HNSW index
-    ├── documents.ts         # CRUD tabel documents
-    └── pdfText.ts           # Ekstraksi teks PDF (pdf-parse)
+├── index.ts                     # Bootstrap HTTP (tipis → composition/container)
+├── backfill.ts                  # CLI reindex (tipis → composition/container)
+│
+├── domain/                      # BISNIS LOGIC — murni, tanpa impor infra
+│   ├── types.ts                 # Tipe domain + ConversationTurn
+│   ├── lead/                    # leadData, scoring, listingGate
+│   ├── handoff/                 # handoffGate
+│   ├── budget/                  # parseBudget
+│   ├── catalog/                 # types, groupListings, catalogBlocks, wantsUnitDetail,
+│   │                            # format, listingDocument
+│   ├── matching/                # text (tokenize/levenshtein), matchAreas
+│   ├── knowledge/               # sanitizeMetadata
+│   └── conversation/            # systemPrompt, parseAgentResult, ChatPrompt
+│
+├── application/                 # APP LOGIC — use-case + port (hanya domain + ports)
+│   ├── ports/                   # LlmPort, CatalogRepository, KnowledgeRepository,
+│   │                            # SessionRepository, DocumentStore, TextExtractor,
+│   │                            # TextChunker, VectorStore
+│   ├── processMessage.ts         # createAgentService (processMessage, resetSession)
+│   ├── contextBuilder.ts         # perakitan konteks + pesan augmented
+│   ├── errors.ts
+│   └── rag/                     # retrieve, ingestDocument, embedListings, reindex,
+│                                # getStats, uploadDocument
+│
+├── infrastructure/              # ADAPTER konkret (framework/lib/db)
+│   ├── config.ts
+│   ├── db.ts
+│   ├── llm/openAiLlm.ts
+│   ├── persistence/             # pgSessionRepository, pgCatalogRepository, pgDocumentStore
+│   ├── knowledge/               # vectorStore, pgVectorKnowledgeRepository
+│   ├── pdf/pdfTextExtractor.ts
+│   └── text/recursiveTextChunker.ts
+│
+├── presentation/http/routes.ts  # Express app + route
+└── composition/container.ts     # Composition root (DI: port → adapter)
 ```
+
+**Aturan dependensi:** `domain ← application ← (infrastructure, presentation)`;
+`composition` merakit semuanya. `domain/` dan `application/` tidak boleh mengimpor
+`express`, `pg`, `@langchain/*`, `openai`, `pdf-parse`, atau folder
+`infrastructure`/`presentation`/`composition` — ditegakkan oleh aturan
+`no-restricted-imports` di `eslint.config.mjs`.
+
+- **Domain** — aturan bisnis murni (skoring lead, gate handoff/listing, parsing budget,
+  agregasi & render katalog, pencocokan area/proyek, prompt, parsing hasil LLM).
+- **Application** — orkestrasi use-case lewat port; opsi runtime (topK, limit unit,
+  riwayat, chunk) di-inject, bukan dibaca dari env.
+- **Infrastructure** — satu-satunya tempat kode spesifik Express/pg/pgvector/OpenAI/pdf-parse.
 
 ### 4.2 Endpoint `ai-agent`
 
-Tidak ada auth (service internal). Route di [`index.ts`](../ai-agent/src/index.ts):
+Tidak ada auth (service internal). Route di
+[`presentation/http/routes.ts`](../ai-agent/src/presentation/http/routes.ts):
 
 | Method | Path | Fungsi |
 | --- | --- | --- |
@@ -292,22 +324,26 @@ Tidak ada auth (service internal). Route di [`index.ts`](../ai-agent/src/index.t
 
 ### 4.3 `processMessage()` — alur inti
 
-File: [`agent/agent.ts`](../ai-agent/src/agent/agent.ts).
+File: [`application/processMessage.ts`](../ai-agent/src/application/processMessage.ts)
+(factory `createAgentService`); prompt di
+[`domain/conversation/systemPrompt.ts`](../ai-agent/src/domain/conversation/systemPrompt.ts).
 
 1. Ambil/buat sesi (`Map` in-memory, fallback hydrate dari `conversations.agent_state`).
 2. **Early exit**: bila `session.needs_human_followup` sudah true, kembalikan
    `resultFromKnown()` (closing, tanpa tanya lagi).
-3. `buildContext()` merakit konteks RAG.
+3. `buildContext()` ([`application/contextBuilder.ts`](../ai-agent/src/application/contextBuilder.ts))
+   merakit konteks RAG lewat port `CatalogRepository` + `KnowledgeRepository`.
 4. `buildAugmentedMessage()` menggabungkan identitas pelanggan, `[KNOWN CUSTOMER DATA]`,
    konteks RAG, reminder schema, dan pesan user.
-5. Panggil LLM (`ChatOpenAI`, model dari `OPENAI_MODEL`, `temperature: 0.4`).
+5. Panggil LLM lewat `LlmPort` (adapter `OpenAiLlm`, model dari `OPENAI_MODEL`,
+   `temperature: 0.4`).
 6. `parseResult()` — ekstrak objek JSON dari respons LLM (defensif; gagal → fallback).
 7. Merge `lead_data` ke `session.known`, normalisasi area, backfill per-turn, lalu
    **hitung ulang** `lead_score` dan `lead_status` server-side.
 8. `enforceHandoffGate()` — blokir handoff prematur.
 9. Gate listing: bila `budget` belum diketahui tetapi balasan memuat baris listing,
    listing dihapus (`stripListingLines`) dan handoff dibatalkan.
-10. Simpan sesi (riwayat dipangkas `MAX_HISTORY_TURNS × 2` pesan).
+10. Simpan sesi lewat `SessionRepository` (riwayat dipangkas `MAX_HISTORY_TURNS × 2`).
 
 ### 4.4 Konteks per turn
 
@@ -325,7 +361,7 @@ Blok yang disuntikkan ke prompt:
 
 ### 4.5 Prompt & conversation flow
 
-`SYSTEM_PROMPT` (konstanta di `agent.ts`) memuat persona sales, aturan grounding
+`SYSTEM_PROMPT` (konstanta di `domain/conversation/systemPrompt.ts`) memuat persona sales, aturan grounding
 anti-halusinasi, tipe properti, flow ketat **STEP 1–5** (intent → kumpulkan field →
 tampilkan listing property-level → unit-level → fallback → handoff), format output JSON,
 contoh few-shot, dan 16 aturan STRICT.
@@ -344,18 +380,19 @@ contoh few-shot, dan 16 aturan STRICT.
 
 ### 4.7 Deterministic gates
 
-- [`handoff.ts`](../ai-agent/src/agent/handoff.ts) — `enforceHandoffGate()` memaksa
-  `needs_human_followup = false` dan menghapus frasa handoff bila `budget`, `area`, dan
-  `property_type` belum semuanya terisi.
-- [`leadState.ts`](../ai-agent/src/agent/leadState.ts) — `containsListingLines()` /
-  `stripListingLines()` mendeteksi baris listing (bullet, penomoran, `Property:`) dan
-  menghapusnya bila budget belum diketahui.
+- [`domain/handoff/handoffGate.ts`](../ai-agent/src/domain/handoff/handoffGate.ts) —
+  `enforceHandoffGate()` memaksa `needs_human_followup = false` dan menghapus frasa handoff
+  bila `budget`, `area`, dan `property_type` belum semuanya terisi.
+- [`domain/lead/listingGate.ts`](../ai-agent/src/domain/lead/listingGate.ts) —
+  `containsListingLines()` / `stripListingLines()` mendeteksi baris listing (bullet,
+  penomoran, `Property:`) dan menghapusnya bila budget belum diketahui.
 
 ### 4.8 Persistensi sesi
 
-- Cache in-memory `Map<string, AgentSession>` di `agent.ts`.
+- Cache in-memory `Map<string, AgentSession>` di
+  [`application/processMessage.ts`](../ai-agent/src/application/processMessage.ts).
 - Sumber kebenaran: `conversations.agent_state` (JSONB) via
-  [`sessionStore.ts`](../ai-agent/src/agent/sessionStore.ts).
+  [`infrastructure/persistence/pgSessionRepository.ts`](../ai-agent/src/infrastructure/persistence/pgSessionRepository.ts).
 - `AgentSession` = `{ history, known, needs_human_followup, user_type }`.
 - Riwayat disimpan sebagai `[{ role: "human"|"ai", content }]`, dipangkas
   `MAX_HISTORY_TURNS × 2`, dan divalidasi oleh `normalizeAgentState()` agar aman terhadap
@@ -368,7 +405,8 @@ contoh few-shot, dan 16 aturan STRICT.
 
 ### 5.1 Vector store
 
-File: [`rag/vectorstore.ts`](../ai-agent/src/rag/vectorstore.ts).
+File: [`infrastructure/knowledge/vectorStore.ts`](../ai-agent/src/infrastructure/knowledge/vectorStore.ts)
+(dipakai oleh adapter [`pgVectorKnowledgeRepository.ts`](../ai-agent/src/infrastructure/knowledge/pgVectorKnowledgeRepository.ts)).
 
 - Embedding: `OpenAIEmbeddings` (`OPENAI_EMBEDDING_MODEL`, default
   `text-embedding-3-small`, dimensi `EMBEDDING_DIMENSIONS`, default `1536`).
@@ -379,32 +417,40 @@ File: [`rag/vectorstore.ts`](../ai-agent/src/rag/vectorstore.ts).
 
 ### 5.2 Ingest inventory
 
-`fetchListings()` mengambil unit `available` dengan `property_type` dan `price` non-null,
-join ke `blocks` dan `properties`. `listingToDocument()` mengubah tiap baris menjadi satu
-`Document` (teks terstruktur) dengan metadata: `doc_type: "inventory"`, `ref_id` (unit id),
-`area`, `property_type`, `size`, `price`, `property_name`, `block_name`, `unit_name`,
-`status`. `embedListings()` menghapus vektor inventory lama lalu menambahkan yang baru
-(batch 100).
+`PgCatalogRepository.fetchAvailableUnits()` (adapter) mengambil unit `available` dengan
+`property_type` dan `price` non-null, join ke `blocks` dan `properties`.
+`listingToDocument()` ([`domain/catalog/listingDocument.ts`](../ai-agent/src/domain/catalog/listingDocument.ts))
+mengubah tiap baris menjadi `StoredDocument` (teks terstruktur) dengan metadata:
+`doc_type: "inventory"`, `ref_id` (unit id), `area`, `property_type`, `size`, `price`,
+`property_name`, `block_name`, `unit_name`, `status`. `embedListings()`
+([`application/rag/embedListings.ts`](../ai-agent/src/application/rag/embedListings.ts))
+menghapus vektor inventory lama lalu menambahkan yang baru (batch 100 di adapter).
 
 ### 5.3 Ingest dokumen PDF
 
-`ingestDocumentText()` memecah teks dengan `RecursiveCharacterTextSplitter`
-(`CHUNK_SIZE` default 1000, `CHUNK_OVERLAP` default 200) dan menyimpan setiap chunk
-dengan metadata `doc_type: "document"`, `ref_id`, `source`, `chunk_index`. Blob PDF asli
-disimpan di tabel `documents` ([`rag/documents.ts`](../ai-agent/src/rag/documents.ts)).
-Ekstraksi teks memakai `pdf-parse` ([`rag/pdfText.ts`](../ai-agent/src/rag/pdfText.ts)).
+`ingestDocument()` ([`application/rag/ingestDocument.ts`](../ai-agent/src/application/rag/ingestDocument.ts))
+memecah teks lewat port `TextChunker` (adapter
+[`RecursiveTextChunker`](../ai-agent/src/infrastructure/text/recursiveTextChunker.ts),
+`CHUNK_SIZE` default 1000, `CHUNK_OVERLAP` default 200) dan menyimpan setiap chunk dengan
+metadata `doc_type: "document"`, `ref_id`, `source`, `chunk_index`. Blob PDF asli disimpan
+di tabel `documents` ([`pgDocumentStore.ts`](../ai-agent/src/infrastructure/persistence/pgDocumentStore.ts)).
+Ekstraksi teks lewat port `TextExtractor` (adapter
+[`PdfTextExtractor`](../ai-agent/src/infrastructure/pdf/pdfTextExtractor.ts), `pdf-parse`).
 
 ### 5.4 Retrieval
 
-`retrieve(query, k, filter?)` memakai `similaritySearchWithScore`. Agent memanggilnya
+`KnowledgeRepository.retrieve(query, k, filter?)` (implementasi
+[`pgVectorKnowledgeRepository.ts`](../ai-agent/src/infrastructure/knowledge/pgVectorKnowledgeRepository.ts))
+memakai `similaritySearchWithScore`. Agent memanggilnya
 dengan filter `{ doc_type: "document" }` (`DOC_TYPE_DOCUMENT`) dan `k = AGENT_TOP_K`
 (default 12). Listing tidak diambil lewat vector search, melainkan langsung dari tabel
 (katalog) untuk akurasi.
 
 ### 5.5 Reindex / backfill
 
-`reindex()` bersifat idempoten: hapus seluruh vektor `doc_type: "document"`, embed ulang
-listing, lalu re-ingest semua baris `documents`. Dijalankan via:
+`reindex()` ([`application/rag/reindex.ts`](../ai-agent/src/application/rag/reindex.ts))
+bersifat idempoten: hapus seluruh vektor `doc_type: "document"`, embed ulang listing, lalu
+re-ingest semua baris `documents`. Dijalankan via:
 
 ```bash
 make backfill        # = docker compose exec ai-agent npm run rag:reindex
@@ -413,27 +459,30 @@ make reindex         # alias backfill
 
 ### 5.6 Statistik
 
-`getRagStats()` menghitung jumlah embedding per `doc_type` (`inventory`, `document`) dan
-jumlah baris tabel `documents`, dipakai dashboard Knowledge Base.
+`getKnowledgeStats()` ([`application/rag/getStats.ts`](../ai-agent/src/application/rag/getStats.ts))
+menghitung jumlah embedding per `doc_type` (`inventory`, `document`) dan jumlah baris tabel
+`documents`, dipakai dashboard Knowledge Base.
 
 ### 5.7 Katalog & pencocokan area/proyek
 
-File: [`catalog/listings.ts`](../ai-agent/src/catalog/listings.ts),
-[`catalog/areas.ts`](../ai-agent/src/catalog/areas.ts).
+Adapter: [`infrastructure/persistence/pgCatalogRepository.ts`](../ai-agent/src/infrastructure/persistence/pgCatalogRepository.ts).
+Domain: [`domain/catalog`](../ai-agent/src/domain/catalog) + [`domain/matching`](../ai-agent/src/domain/matching).
 
-- `fetchListingCatalog()` — query unit `available` dengan filter kota, `propertyIds`, tipe,
-  dan `maxPrice` (budget).
+- `fetchCatalog()` — query unit `available` dengan filter kota, `propertyIds`, tipe,
+  dan `maxPrice` (budget); hasil dikelompokkan oleh `groupListings()`.
 - `groupListings()` — mengelompokkan baris menjadi `properties → blocks → units` dengan
-  agregat harga/luas/tipe.
-- `buildPropertyCatalogBlock()` — blok `[PROPERTY CATALOG]` (level properti + ringkasan
-  blok). `buildUnitDetailBlock()` — blok `[UNIT DETAIL]` (dibatasi `AGENT_UNIT_DETAIL_LIMIT`).
+  agregat harga/luas/tipe ([`domain/catalog/groupListings.ts`](../ai-agent/src/domain/catalog/groupListings.ts)).
+- `buildPropertyCatalogBlock()` / `buildUnitDetailBlock()`
+  ([`domain/catalog/catalogBlocks.ts`](../ai-agent/src/domain/catalog/catalogBlocks.ts)) —
+  blok `[PROPERTY CATALOG]` dan `[UNIT DETAIL]` (dibatasi `AGENT_UNIT_DETAIL_LIMIT`).
 - `wantsUnitDetail()` — mendeteksi permintaan detail (kata kunci `detail`, `unit`, `tipe`,
   `luas`, dst.) atau penyebutan nama properti/blok.
-- `detectMatchingAreas()` / `detectMatchingProperties()` — pencocokan toleran typo dengan
-  `tokenize()` + jarak `levenshtein()` (maks 1), untuk alias seperti "brasia garden" →
-  "Brassia Garden".
-- `parseBudgetToIdr()` ([`agent/budget.ts`](../ai-agent/src/agent/budget.ts)) mengubah
-  "2 Miliar", "Rp 3 M", "500 juta", "1.5m" menjadi nominal IDR.
+- `detectMatchingAreas()` / `detectMatchingProperties()`
+  ([`domain/matching/matchAreas.ts`](../ai-agent/src/domain/matching/matchAreas.ts)) —
+  pencocokan toleran typo dengan `tokenize()` + jarak `levenshtein()` (maks 1), untuk alias
+  seperti "brasia garden" → "Brassia Garden".
+- `parseBudgetToIdr()` ([`domain/budget/parseBudget.ts`](../ai-agent/src/domain/budget/parseBudget.ts))
+  mengubah "2 Miliar", "Rp 3 M", "500 juta", "1.5m" menjadi nominal IDR.
 
 ---
 
@@ -537,11 +586,11 @@ Unit test ada di service `ai-agent` (Vitest), dijalankan dengan `npm test`:
 
 | File | Cakupan |
 | --- | --- |
-| `agent/leadState.test.ts` | Merge/backfill lead, scoring, gate baris listing, normalisasi area. |
-| `agent/handoff.test.ts` | `hasKeyInfo`, `enforceHandoffGate`, `stripHandoffPhrase`. |
-| `agent/budget.test.ts` | `parseBudgetToIdr` (miliar/juta/ribu, format Indonesia). |
-| `catalog/areas.test.ts` | Pencocokan area & nama proyek toleran typo. |
-| `catalog/listings.test.ts` | `groupListings`, builder katalog/unit detail, `wantsUnitDetail`. |
+| `domain/lead/leadData.test.ts` | Merge/backfill lead, scoring, gate baris listing, normalisasi area. |
+| `domain/handoff/handoffGate.test.ts` | `hasKeyInfo`, `enforceHandoffGate`, `stripHandoffPhrase`. |
+| `domain/budget/parseBudget.test.ts` | `parseBudgetToIdr` (miliar/juta/ribu, format Indonesia). |
+| `domain/matching/matchAreas.test.ts` | Pencocokan area & nama proyek toleran typo. |
+| `domain/catalog/groupListings.test.ts` | `groupListings`, builder katalog/unit detail, `wantsUnitDetail`. |
 
 Backend dan frontend belum memiliki suite test otomatis; verifikasi backend lewat
 `npm run type-check` dan `npm run lint`.

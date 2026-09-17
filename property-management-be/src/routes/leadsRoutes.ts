@@ -6,6 +6,6 @@ const router = Router();
 
 // Mounted at the API root so paths match the documented API.
 router.get('/leads', authenticate, getLeadsController);
-router.patch('/lead/:id/toogle-agent', authenticate, toggleLeadAgentController);
+router.patch('/lead/:id/toggle-agent', authenticate, toggleLeadAgentController);
 
 export default router;
